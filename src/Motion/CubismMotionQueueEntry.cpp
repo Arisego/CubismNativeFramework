@@ -146,7 +146,7 @@ csmBool CubismMotionQueueEntry::IsTriggeredFadeOut()
     return this->_IsTriggeredFadeOut && _endTimeSeconds < 0.0f;
 }
 
-csmBool CubismMotionQueueEntry::GetFadeOutSeconds()
+csmFloat32 CubismMotionQueueEntry::GetFadeOutSeconds()
 {
     return this->_fadeOutSeconds;
 }
