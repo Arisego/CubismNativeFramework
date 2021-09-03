@@ -12,6 +12,17 @@
 //------------ LIVE2D NAMESPACE ------------
 namespace Live2D { namespace Cubism { namespace Framework { namespace Rendering {
 
+
+    CubismRenderer* CubismRenderer::Create()
+    {
+        return nullptr;
+    }
+
+    void CubismRenderer::StaticRelease()
+    {
+        
+    }
+
 void CubismRenderer::Delete(CubismRenderer* renderer)
 {
     CSM_DELETE_SELF(CubismRenderer, renderer);
