@@ -11,6 +11,7 @@
 #include "CubismFramework.hpp"
 #include "CubismOffscreenSurface_Cocos2dx.hpp"
 #include "CubismCommandBuffer_Cocos2dx.hpp"
+#include "Math/CubismVector2.hpp"
 #include "Type/csmVector.hpp"
 #include "Type/csmRectF.hpp"
 #include "Type/csmMap.hpp"
@@ -137,7 +138,7 @@ private:
      *@param  size -> クリッピングマスクバッファのサイズ
      *
      */
-    void SetClippingMaskBufferSize(csmInt32 size);
+    void SetClippingMaskBufferSize(csmFloat32 width, csmFloat32 height);
 
     /**
      *@brief  クリッピングマスクバッファのサイズを取得する
@@ -145,14 +146,14 @@ private:
      *@return クリッピングマスクバッファのサイズ
      *
      */
-    csmInt32 GetClippingMaskBufferSize() const;
+    CubismVector2 GetClippingMaskBufferSize() const;
 
     csmInt32    _currentFrameNo;         ///< マスクテクスチャに与えるフレーム番号
 
     csmVector<CubismRenderer::CubismTextureColor*>  _channelColors;
     csmVector<CubismClippingContext*>               _clippingContextListForMask;   ///< マスク用クリッピングコンテキストのリスト
     csmVector<CubismClippingContext*>               _clippingContextListForDraw;   ///< 描画用クリッピングコンテキストのリスト
-    csmInt32                                        _clippingMaskBufferSize; ///< クリッピングマスクのバッファサイズ（初期値:256）
+    CubismVector2                                   _clippingMaskBufferSize; ///< クリッピングマスクのバッファサイズ（初期値:256）
 
     CubismMatrix44  _tmpMatrix;              ///< マスク計算用の行列
     CubismMatrix44  _tmpMatrixForMask;       ///< マスク計算用の行列
@@ -246,6 +247,8 @@ private:
         cocos2d::backend::UniformLocation SamplerTexture0Location;      ///< シェーダプログラムに渡す変数のアドレス(Texture0)
         cocos2d::backend::UniformLocation SamplerTexture1Location;      ///< シェーダプログラムに渡す変数のアドレス(Texture1)
         cocos2d::backend::UniformLocation UniformBaseColorLocation;     ///< シェーダプログラムに渡す変数のアドレス(BaseColor)
+        cocos2d::backend::UniformLocation UniformMultiplyColorLocation;     ///< シェーダプログラムに渡す変数のアドレス(MultiplyColor)
+        cocos2d::backend::UniformLocation UniformScreenColorLocation;     ///< シェーダプログラムに渡す変数のアドレス(ScreenColor)
         cocos2d::backend::UniformLocation UnifromChannelFlagLocation;   ///< シェーダプログラムに渡す変数のアドレス(ChannelFlag)
     };
 
@@ -279,6 +282,8 @@ private:
                             , csmFloat32* uvArray, csmFloat32 opacity
                             , CubismRenderer::CubismBlendMode colorBlendMode
                             , CubismRenderer::CubismTextureColor baseColor
+                            , CubismRenderer::CubismTextureColor multiplyColor
+                            , CubismRenderer::CubismTextureColor screenColor
                             , csmBool isPremultipliedAlpha, CubismMatrix44 matrix4x4
                             , csmBool invertedMask);
 
@@ -404,10 +409,11 @@ public:
      * @brief  クリッピングマスクバッファのサイズを設定する<br>
      *         マスク用のFrameBufferを破棄・再作成するため処理コストは高い。
      *
-     * @param[in]  size -> クリッピングマスクバッファのサイズ
+     * @param[in]  width -> クリッピングマスクバッファの横サイズ
+     * @param[in]  height -> クリッピングマスクバッファの縦サイズ
      *
      */
-    void SetClippingMaskBufferSize(csmInt32 size);
+    void SetClippingMaskBufferSize(csmFloat32 width, csmFloat32 height);
 
     /**
      * @brief  クリッピングマスクバッファのサイズを取得する
@@ -415,13 +421,14 @@ public:
      * @return クリッピングマスクバッファのサイズ
      *
      */
-    csmInt32 GetClippingMaskBufferSize() const;
+    CubismVector2 GetClippingMaskBufferSize() const;
 
 
-    CubismCommandBuffer_Cocos2dx* GetCommandBuffer()
-    {
-        return &_commandBuffer;
-    }
+    static CubismCommandBuffer_Cocos2dx* GetCommandBuffer();
+
+    static void StartFrame(CubismCommandBuffer_Cocos2dx* commandBuffer);
+
+    static void EndFrame(CubismCommandBuffer_Cocos2dx* commandBuffer);
 
 protected:
     /**
@@ -461,6 +468,7 @@ protected:
 
     void DrawMeshCocos2d(CubismCommandBuffer_Cocos2dx::DrawCommandBuffer::DrawCommand* drawCommand, csmInt32 textureNo, csmInt32 indexCount, csmInt32 vertexCount
                   , csmUint16* indexArray, csmFloat32* vertexArray, csmFloat32* uvArray
+                  , const CubismTextureColor& multiplyColor, const CubismTextureColor& screenColor
                   , csmFloat32 opacity, CubismBlendMode colorBlendMode, csmBool invertedMask);
 
     CubismCommandBuffer_Cocos2dx::DrawCommandBuffer* GetDrawCommandBufferData(csmInt32 drawableIndex);
@@ -547,7 +555,6 @@ private:
     CubismClippingContext*              _clippingContextBufferForDraw;  ///< 画面上描画するためのクリッピングコンテキスト
 
     CubismOffscreenFrame_Cocos2dx      _offscreenFrameBuffer;          ///< マスク描画用のフレームバッファ
-    CubismCommandBuffer_Cocos2dx       _commandBuffer;
     csmVector<CubismCommandBuffer_Cocos2dx::DrawCommandBuffer*>  _drawableDrawCommandBuffer;
 };
 

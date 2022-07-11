@@ -29,7 +29,7 @@ const csmInt32 ColorChannelCount = 4;   ///< 実験時に1チャンネルの場�
 
 CubismClippingManager_Cocos2dx::CubismClippingManager_Cocos2dx() :
                                                                    _currentFrameNo(0)
-                                                                   , _clippingMaskBufferSize(256)
+                                                                   , _clippingMaskBufferSize(256, 256)
 {
     CubismRenderer::CubismTextureColor* tmp;
     tmp = CSM_NEW CubismRenderer::CubismTextureColor();
@@ -193,17 +193,52 @@ void CubismClippingManager_Cocos2dx::SetupClippingContext(CubismModel& model, Cu
             CubismClippingContext* clipContext = _clippingContextListForMask[clipIndex];
             csmRectF* allClippedDrawRect = clipContext->_allClippedDrawRect; //このマスクを使う、全ての描画オブジェクトの論理座標上の囲み矩形
             csmRectF* layoutBoundsOnTex01 = clipContext->_layoutBounds; //この中にマスクを収める
-
-            // モデル座標上の矩形を、適宜マージンを付けて使う
             const csmFloat32 MARGIN = 0.05f;
-            _tmpBoundsOnModel.SetRect(allClippedDrawRect);
-            _tmpBoundsOnModel.Expand(allClippedDrawRect->Width * MARGIN, allClippedDrawRect->Height * MARGIN);
-            //########## 本来は割り当てられた領域の全体を使わず必要最低限のサイズがよい
+            csmFloat32 scaleX = 0.0f;
+            csmFloat32 scaleY = 0.0f;
 
-            // シェーダ用の計算式を求める。回転を考慮しない場合は以下のとおり
-            // movePeriod' = movePeriod * scaleX + offX     [[ movePeriod' = (movePeriod - tmpBoundsOnModel.movePeriod)*scale + layoutBoundsOnTex01.movePeriod ]]
-            const csmFloat32 scaleX = layoutBoundsOnTex01->Width / _tmpBoundsOnModel.Width;
-            const csmFloat32 scaleY = layoutBoundsOnTex01->Height / _tmpBoundsOnModel.Height;
+            if (renderer->IsUsingHighPrecisionMask())
+            {
+                const csmFloat32 ppu = model.GetPixelsPerUnit();
+                const csmFloat32 maskPixelWidth = clipContext->_owner->_clippingMaskBufferSize.X;
+                const csmFloat32 maskPixelHeight = clipContext->_owner->_clippingMaskBufferSize.Y;
+                const csmFloat32 physicalMaskWidth = layoutBoundsOnTex01->Width * maskPixelWidth;
+                const csmFloat32 physicalMaskHeight = layoutBoundsOnTex01->Height * maskPixelHeight;
+
+
+                _tmpBoundsOnModel.SetRect(allClippedDrawRect);
+
+                if (_tmpBoundsOnModel.Width * ppu > physicalMaskWidth)
+                {
+                    _tmpBoundsOnModel.Expand(allClippedDrawRect->Width * MARGIN, 0.0f);
+                    scaleX = layoutBoundsOnTex01->Width / _tmpBoundsOnModel.Width;
+                }
+                else
+                {
+                    scaleX = ppu / physicalMaskWidth;
+                }
+
+                if (_tmpBoundsOnModel.Height * ppu > physicalMaskHeight)
+                {
+                    _tmpBoundsOnModel.Expand(0.0f, allClippedDrawRect->Height * MARGIN);
+                    scaleY = layoutBoundsOnTex01->Height / _tmpBoundsOnModel.Height;
+                }
+                else
+                {
+                    scaleY = ppu / physicalMaskHeight;
+                }
+            }
+            else
+            {
+                // モデル座標上の矩形を、適宜マージンを付けて使う
+                _tmpBoundsOnModel.SetRect(allClippedDrawRect);
+                _tmpBoundsOnModel.Expand(allClippedDrawRect->Width * MARGIN, allClippedDrawRect->Height * MARGIN);
+                //########## 本来は割り当てられた領域の全体を使わず必要最低限のサイズがよい
+                // シェーダ用の計算式を求める。回転を考慮しない場合は以下のとおり
+                // movePeriod' = movePeriod * scaleX + offX     [[ movePeriod' = (movePeriod - tmpBoundsOnModel.movePeriod)*scale + layoutBoundsOnTex01.movePeriod ]]
+                scaleX = layoutBoundsOnTex01->Width / _tmpBoundsOnModel.Width;
+                scaleY = layoutBoundsOnTex01->Height / _tmpBoundsOnModel.Height;
+            }
 
             // マスク生成時に使う行列を求める
             {
@@ -258,30 +293,27 @@ void CubismClippingManager_Cocos2dx::SetupClippingContext(CubismModel& model, Cu
                         continue;
                     }
 
+                    // Update Vertex / Index buffer.
                     {
-                        // Update Vertex / Index buffer.
+                        csmFloat32* vertices = const_cast<csmFloat32*>(model.GetDrawableVertices(clipDrawIndex));
+                        Core::csmVector2* uvs = const_cast<Core::csmVector2*>(model.GetDrawableVertexUvs(clipDrawIndex));
+                        csmUint16* vertexIndices = const_cast<csmUint16*>(model.GetDrawableVertexIndices(clipDrawIndex));
+                        const csmUint32 vertexCount = model.GetDrawableVertexCount(clipDrawIndex);
+                        const csmUint32 vertexIndexCount = model.GetDrawableVertexIndexCount(clipDrawIndex);
+
+                        drawCommandBufferData->UpdateVertexBuffer(vertices, uvs, vertexCount);
+                        drawCommandBufferData->CommitVertexBuffer();
+                        if (vertexIndexCount > 0)
                         {
-                            csmFloat32* vertices = const_cast<csmFloat32*>(model.GetDrawableVertices(clipDrawIndex));
-                            Core::csmVector2* uvs = const_cast<Core::csmVector2*>(model.GetDrawableVertexUvs(clipDrawIndex));
-                            csmUint16* vertexIndices = const_cast<csmUint16*>(model.GetDrawableVertexIndices(clipDrawIndex));
-                            const csmUint32 vertexCount = model.GetDrawableVertexCount(clipDrawIndex);
-                            const csmUint32 vertexIndexCount = model.GetDrawableVertexIndexCount(clipDrawIndex);
-
-                            drawCommandBufferData->UpdateVertexBuffer(vertices, uvs, vertexCount);
-                            drawCommandBufferData->CommitVertexBuffer();
-                            if (vertexIndexCount > 0)
-                            {
-                                drawCommandBufferData->UpdateIndexBuffer(vertexIndices, vertexIndexCount);
-                            }
-
-                            if (vertexCount <= 0)
-                            {
-                                continue;
-                            }
-
+                            drawCommandBufferData->UpdateIndexBuffer(vertexIndices, vertexIndexCount);
                         }
-                    }
 
+                        if (vertexCount <= 0)
+                        {
+                            continue;
+                        }
+
+                    }
 
                     renderer->IsCulling(model.GetDrawableCulling(clipDrawIndex) != 0);
 
@@ -289,16 +321,16 @@ void CubismClippingManager_Cocos2dx::SetupClippingContext(CubismModel& model, Cu
                     // チャンネルも切り替える必要がある(A,R,G,B)
                     renderer->SetClippingContextBufferForMask(clipContext);
 
-
-
                     renderer->DrawMeshCocos2d(
                         drawCommandBufferData->GetCommandDraw(),
-                        model.GetDrawableTextureIndices(clipDrawIndex),
+                        model.GetDrawableTextureIndex(clipDrawIndex),
                         model.GetDrawableVertexIndexCount(clipDrawIndex),
                         model.GetDrawableVertexCount(clipDrawIndex),
                         const_cast<csmUint16*>(model.GetDrawableVertexIndices(clipDrawIndex)),
                         const_cast<csmFloat32*>(model.GetDrawableVertices(clipDrawIndex)),
                         reinterpret_cast<csmFloat32*>(const_cast<Core::csmVector2*>(model.GetDrawableVertexUvs(clipDrawIndex))),
+                        model.GetMultiplyColor(clipDrawIndex),
+                        model.GetScreenColor(clipDrawIndex),
                         model.GetDrawableOpacity(clipDrawIndex),
                         CubismRenderer::CubismBlendMode_Normal,   //クリッピングは通常描画を強制
                         false   // マスク生成時はクリッピングの反転使用は全く関係がない
@@ -321,7 +353,7 @@ void CubismClippingManager_Cocos2dx::CalcClippedDrawTotalBounds(CubismModel& mod
 {
     // 被クリッピングマスク（マスクされる描画オブジェクト）の全体の矩形
     csmFloat32 clippedDrawTotalMinX = FLT_MAX, clippedDrawTotalMinY = FLT_MAX;
-    csmFloat32 clippedDrawTotalMaxX = FLT_MIN, clippedDrawTotalMaxY = FLT_MIN;
+    csmFloat32 clippedDrawTotalMaxX = -FLT_MAX, clippedDrawTotalMaxY = -FLT_MAX;
 
     // このマスクが実際に必要か判定する
     // このクリッピングを利用する「描画オブジェクト」がひとつでも使用可能であればマスクを生成する必要がある
@@ -336,7 +368,7 @@ void CubismClippingManager_Cocos2dx::CalcClippedDrawTotalBounds(CubismModel& mod
         csmFloat32* drawableVertexes = const_cast<csmFloat32*>(model.GetDrawableVertices(drawableIndex));
 
         csmFloat32 minX = FLT_MAX, minY = FLT_MAX;
-        csmFloat32 maxX = FLT_MIN, maxY = FLT_MIN;
+        csmFloat32 maxX = -FLT_MAX, maxY = -FLT_MAX;
 
         csmInt32 loop = drawableVertexCount * Constant::VertexStep;
         for (csmInt32 pi = Constant::VertexOffset; pi < loop; pi += Constant::VertexStep)
@@ -506,12 +538,12 @@ csmVector<CubismClippingContext*>* CubismClippingManager_Cocos2dx::GetClippingCo
     return &_clippingContextListForDraw;
 }
 
-void CubismClippingManager_Cocos2dx::SetClippingMaskBufferSize(csmInt32 size)
+void CubismClippingManager_Cocos2dx::SetClippingMaskBufferSize(csmFloat32 width, csmFloat32 height)
 {
-    _clippingMaskBufferSize = size;
+    _clippingMaskBufferSize = CubismVector2(width, height);
 }
 
-csmInt32 CubismClippingManager_Cocos2dx::GetClippingMaskBufferSize() const
+CubismVector2 CubismClippingManager_Cocos2dx::GetClippingMaskBufferSize() const
 {
     return _clippingMaskBufferSize;
 }
@@ -798,9 +830,14 @@ static const csmChar* FragShaderSrc =
     "varying vec2 v_texCoord;" //v2f.texcoord
     "uniform sampler2D s_texture0;" //_MainTex
     "uniform vec4 u_baseColor;" //v2f.color
+    "uniform vec4 u_multiplyColor;"
+    "uniform vec4 u_screenColor;"
     "void main()"
     "{"
-    "vec4 color = texture2D(s_texture0 , v_texCoord) * u_baseColor;"
+    "vec4 texColor = texture2D(s_texture0 , v_texCoord);"
+    "texColor.rgb = texColor.rgb * u_multiplyColor.rgb;"
+    "texColor.rgb = texColor.rgb + u_screenColor.rgb - (texColor.rgb * u_screenColor.rgb);"
+    "vec4 color = texColor * u_baseColor;"
     "gl_FragColor = vec4(color.rgb * color.a,  color.a);"
     "}";
 #if CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID
@@ -810,9 +847,14 @@ static const csmChar* FragShaderSrcTegra =
     "varying vec2 v_texCoord;" //v2f.texcoord
     "uniform sampler2D s_texture0;" //_MainTex
     "uniform vec4 u_baseColor;" //v2f.color
+    "uniform vec4 u_multiplyColor;"
+    "uniform vec4 u_screenColor;"
     "void main()"
     "{"
-    "vec4 color = texture2D(s_texture0 , v_texCoord) * u_baseColor;"
+    "vec4 texColor = texture2D(s_texture0 , v_texCoord);"
+    "texColor.rgb = texColor.rgb * u_multiplyColor.rgb;"
+    "texColor.rgb = texColor.rgb + u_screenColor.rgb - (texColor.rgb * u_screenColor.rgb);"
+    "vec4 color = texColor * u_baseColor;"
     "gl_FragColor = vec4(color.rgb * color.a,  color.a);"
     "}";
 #endif
@@ -825,9 +867,14 @@ static const csmChar* FragShaderSrcPremultipliedAlpha =
     "varying vec2 v_texCoord;" //v2f.texcoord
     "uniform sampler2D s_texture0;" //_MainTex
     "uniform vec4 u_baseColor;" //v2f.color
+    "uniform vec4 u_multiplyColor;"
+    "uniform vec4 u_screenColor;"
     "void main()"
     "{"
-    "gl_FragColor = texture2D(s_texture0 , v_texCoord) * u_baseColor;"
+    "vec4 texColor = texture2D(s_texture0 , v_texCoord);"
+    "texColor.rgb = texColor.rgb * u_multiplyColor.rgb;"
+    "texColor.rgb = (texColor.rgb + u_screenColor.rgb * texColor.a) - (texColor.rgb * u_screenColor.rgb);"
+    "gl_FragColor = texColor * u_baseColor;"
     "}";
 #if CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID
 static const csmChar* FragShaderSrcPremultipliedAlphaTegra =
@@ -836,9 +883,14 @@ static const csmChar* FragShaderSrcPremultipliedAlphaTegra =
     "varying vec2 v_texCoord;" //v2f.texcoord
     "uniform sampler2D s_texture0;" //_MainTex
     "uniform vec4 u_baseColor;" //v2f.color
+    "uniform vec4 u_multiplyColor;"
+    "uniform vec4 u_screenColor;"
     "void main()"
     "{"
-    "gl_FragColor = texture2D(s_texture0 , v_texCoord) * u_baseColor;"
+    "vec4 texColor = texture2D(s_texture0 , v_texCoord);"
+    "texColor.rgb = texColor.rgb * u_multiplyColor.rgb;"
+    "texColor.rgb = (texColor.rgb + u_screenColor.rgb * texColor.a) - (texColor.rgb * u_screenColor.rgb);"
+    "gl_FragColor = texColor * u_baseColor;"
     "}";
 #endif
 
@@ -853,9 +905,14 @@ static const csmChar* FragShaderSrcMask =
     "uniform sampler2D s_texture1;"
     "uniform vec4 u_channelFlag;"
     "uniform vec4 u_baseColor;"
+    "uniform vec4 u_multiplyColor;"
+    "uniform vec4 u_screenColor;"
     "void main()"
     "{"
-    "vec4 col_formask = texture2D(s_texture0 , v_texCoord) * u_baseColor;"
+    "vec4 texColor = texture2D(s_texture0 , v_texCoord);"
+    "texColor.rgb = texColor.rgb * u_multiplyColor.rgb;"
+    "texColor.rgb = texColor.rgb + u_screenColor.rgb - (texColor.rgb * u_screenColor.rgb);"
+    "vec4 col_formask = texColor * u_baseColor;"
     "col_formask.rgb = col_formask.rgb  * col_formask.a ;"
     "vec4 clipMask = (1.0 - texture2D(s_texture1, v_clipPos.xy / v_clipPos.w)) * u_channelFlag;"
     "float maskVal = clipMask.r + clipMask.g + clipMask.b + clipMask.a;"
@@ -872,9 +929,14 @@ static const csmChar* FragShaderSrcMaskTegra =
     "uniform sampler2D s_texture1;"
     "uniform vec4 u_channelFlag;"
     "uniform vec4 u_baseColor;"
+    "uniform vec4 u_multiplyColor;"
+    "uniform vec4 u_screenColor;"
     "void main()"
     "{"
-    "vec4 col_formask = texture2D(s_texture0 , v_texCoord) * u_baseColor;"
+    "vec4 texColor = texture2D(s_texture0 , v_texCoord);"
+    "texColor.rgb = texColor.rgb * u_multiplyColor.rgb;"
+    "texColor.rgb = texColor.rgb + u_screenColor.rgb - (texColor.rgb * u_screenColor.rgb);"
+    "vec4 col_formask = texColor * u_baseColor;"
     "col_formask.rgb = col_formask.rgb  * col_formask.a ;"
     "vec4 clipMask = (1.0 - texture2D(s_texture1, v_clipPos.xy / v_clipPos.w)) * u_channelFlag;"
     "float maskVal = clipMask.r + clipMask.g + clipMask.b + clipMask.a;"
@@ -894,9 +956,14 @@ static const csmChar* FragShaderSrcMaskInverted =
     "uniform sampler2D s_texture1;"
     "uniform vec4 u_channelFlag;"
     "uniform vec4 u_baseColor;"
+    "uniform vec4 u_multiplyColor;"
+    "uniform vec4 u_screenColor;"
     "void main()"
     "{"
-    "vec4 col_formask = texture2D(s_texture0 , v_texCoord) * u_baseColor;"
+    "vec4 texColor = texture2D(s_texture0 , v_texCoord);"
+    "texColor.rgb = texColor.rgb * u_multiplyColor.rgb;"
+    "texColor.rgb = texColor.rgb + u_screenColor.rgb - (texColor.rgb * u_screenColor.rgb);"
+    "vec4 col_formask = texColor * u_baseColor;"
     "col_formask.rgb = col_formask.rgb  * col_formask.a ;"
     "vec4 clipMask = (1.0 - texture2D(s_texture1, v_clipPos.xy / v_clipPos.w)) * u_channelFlag;"
     "float maskVal = clipMask.r + clipMask.g + clipMask.b + clipMask.a;"
@@ -913,9 +980,14 @@ static const csmChar* FragShaderSrcMaskInvertedTegra =
     "uniform sampler2D s_texture1;"
     "uniform vec4 u_channelFlag;"
     "uniform vec4 u_baseColor;"
+    "uniform vec4 u_multiplyColor;"
+    "uniform vec4 u_screenColor;"
     "void main()"
     "{"
-    "vec4 col_formask = texture2D(s_texture0 , v_texCoord) * u_baseColor;"
+    "vec4 texColor = texture2D(s_texture0 , v_texCoord);"
+    "texColor.rgb = texColor.rgb * u_multiplyColor.rgb;"
+    "texColor.rgb = texColor.rgb + u_screenColor.rgb - (texColor.rgb * u_screenColor.rgb);"
+    "vec4 col_formask = texColor * u_baseColor;"
     "col_formask.rgb = col_formask.rgb  * col_formask.a ;"
     "vec4 clipMask = (1.0 - texture2D(s_texture1, v_clipPos.xy / v_clipPos.w)) * u_channelFlag;"
     "float maskVal = clipMask.r + clipMask.g + clipMask.b + clipMask.a;"
@@ -935,9 +1007,14 @@ static const csmChar* FragShaderSrcMaskPremultipliedAlpha =
     "uniform sampler2D s_texture1;"
     "uniform vec4 u_channelFlag;"
     "uniform vec4 u_baseColor;"
+    "uniform vec4 u_multiplyColor;"
+    "uniform vec4 u_screenColor;"
     "void main()"
     "{"
-    "vec4 col_formask = texture2D(s_texture0 , v_texCoord) * u_baseColor;"
+    "vec4 texColor = texture2D(s_texture0 , v_texCoord);"
+    "texColor.rgb = texColor.rgb * u_multiplyColor.rgb;"
+    "texColor.rgb = (texColor.rgb + u_screenColor.rgb * texColor.a) - (texColor.rgb * u_screenColor.rgb);"
+    "vec4 col_formask = texColor * u_baseColor;"
     "vec4 clipMask = (1.0 - texture2D(s_texture1, v_clipPos.xy / v_clipPos.w)) * u_channelFlag;"
     "float maskVal = clipMask.r + clipMask.g + clipMask.b + clipMask.a;"
     "col_formask = col_formask * maskVal;"
@@ -953,9 +1030,14 @@ static const csmChar* FragShaderSrcMaskPremultipliedAlphaTegra =
     "uniform sampler2D s_texture1;"
     "uniform vec4 u_channelFlag;"
     "uniform vec4 u_baseColor;"
+    "uniform vec4 u_multiplyColor;"
+    "uniform vec4 u_screenColor;"
     "void main()"
     "{"
-    "vec4 col_formask = texture2D(s_texture0 , v_texCoord) * u_baseColor;"
+    "vec4 texColor = texture2D(s_texture0 , v_texCoord);"
+    "texColor.rgb = texColor.rgb * u_multiplyColor.rgb;"
+    "texColor.rgb = (texColor.rgb + u_screenColor.rgb * texColor.a) - (texColor.rgb * u_screenColor.rgb);"
+    "vec4 col_formask = texColor * u_baseColor;"
     "vec4 clipMask = (1.0 - texture2D(s_texture1, v_clipPos.xy / v_clipPos.w)) * u_channelFlag;"
     "float maskVal = clipMask.r + clipMask.g + clipMask.b + clipMask.a;"
     "col_formask = col_formask * maskVal;"
@@ -974,9 +1056,14 @@ static const csmChar* FragShaderSrcMaskInvertedPremultipliedAlpha =
     "uniform sampler2D s_texture1;"
     "uniform vec4 u_channelFlag;"
     "uniform vec4 u_baseColor;"
+    "uniform vec4 u_multiplyColor;"
+    "uniform vec4 u_screenColor;"
     "void main()"
     "{"
-    "vec4 col_formask = texture2D(s_texture0 , v_texCoord) * u_baseColor;"
+    "vec4 texColor = texture2D(s_texture0 , v_texCoord);"
+    "texColor.rgb = texColor.rgb * u_multiplyColor.rgb;"
+    "texColor.rgb = (texColor.rgb + u_screenColor.rgb * texColor.a) - (texColor.rgb * u_screenColor.rgb);"
+    "vec4 col_formask = texColor * u_baseColor;"
     "vec4 clipMask = (1.0 - texture2D(s_texture1, v_clipPos.xy / v_clipPos.w)) * u_channelFlag;"
     "float maskVal = clipMask.r + clipMask.g + clipMask.b + clipMask.a;"
     "col_formask = col_formask * (1.0 - maskVal);"
@@ -992,9 +1079,14 @@ static const csmChar* FragShaderSrcMaskInvertedPremultipliedAlphaTegra =
     "uniform sampler2D s_texture1;"
     "uniform vec4 u_channelFlag;"
     "uniform vec4 u_baseColor;"
+    "uniform vec4 u_multiplyColor;"
+    "uniform vec4 u_screenColor;"
     "void main()"
     "{"
-    "vec4 col_formask = texture2D(s_texture0 , v_texCoord) * u_baseColor;"
+    "vec4 texColor = texture2D(s_texture0 , v_texCoord);"
+    "texColor.rgb = texColor.rgb * u_multiplyColor.rgb;"
+    "texColor.rgb = (texColor.rgb + u_screenColor.rgb * texColor.a) - (texColor.rgb * u_screenColor.rgb);"
+    "vec4 col_formask = texColor * u_baseColor;"
     "vec4 clipMask = (1.0 - texture2D(s_texture1, v_clipPos.xy / v_clipPos.w)) * u_channelFlag;"
     "float maskVal = clipMask.r + clipMask.g + clipMask.b + clipMask.a;"
     "col_formask = col_formask * (1.0 - maskVal);"
@@ -1122,6 +1214,8 @@ void CubismShader_Cocos2dx::GenerateShaders()
     _shaderSets[0]->UniformClipMatrixLocation = _shaderSets[0]->ShaderProgram->getUniformLocation("u_clipMatrix");
     _shaderSets[0]->UnifromChannelFlagLocation = _shaderSets[0]->ShaderProgram->getUniformLocation("u_channelFlag");
     _shaderSets[0]->UniformBaseColorLocation = _shaderSets[0]->ShaderProgram->getUniformLocation("u_baseColor");
+    _shaderSets[0]->UniformMultiplyColorLocation = _shaderSets[0]->ShaderProgram->getUniformLocation("u_multiplyColor");
+    _shaderSets[0]->UniformScreenColorLocation = _shaderSets[0]->ShaderProgram->getUniformLocation("u_screenColor");
 
     // 通常
     _shaderSets[1]->AttributePositionLocation = _shaderSets[1]->ShaderProgram->getAttributeLocation("a_position");
@@ -1129,6 +1223,8 @@ void CubismShader_Cocos2dx::GenerateShaders()
     _shaderSets[1]->SamplerTexture0Location = _shaderSets[1]->ShaderProgram->getUniformLocation("s_texture0");
     _shaderSets[1]->UniformMatrixLocation = _shaderSets[1]->ShaderProgram->getUniformLocation("u_matrix");
     _shaderSets[1]->UniformBaseColorLocation = _shaderSets[1]->ShaderProgram->getUniformLocation("u_baseColor");
+    _shaderSets[1]->UniformMultiplyColorLocation = _shaderSets[1]->ShaderProgram->getUniformLocation("u_multiplyColor");
+    _shaderSets[1]->UniformScreenColorLocation = _shaderSets[1]->ShaderProgram->getUniformLocation("u_screenColor");
 
     // 通常（クリッピング）
     _shaderSets[2]->AttributePositionLocation = _shaderSets[2]->ShaderProgram->getAttributeLocation("a_position");
@@ -1139,6 +1235,8 @@ void CubismShader_Cocos2dx::GenerateShaders()
     _shaderSets[2]->UniformClipMatrixLocation = _shaderSets[2]->ShaderProgram->getUniformLocation("u_clipMatrix");
     _shaderSets[2]->UnifromChannelFlagLocation = _shaderSets[2]->ShaderProgram->getUniformLocation("u_channelFlag");
     _shaderSets[2]->UniformBaseColorLocation = _shaderSets[2]->ShaderProgram->getUniformLocation("u_baseColor");
+    _shaderSets[2]->UniformMultiplyColorLocation = _shaderSets[2]->ShaderProgram->getUniformLocation("u_multiplyColor");
+    _shaderSets[2]->UniformScreenColorLocation = _shaderSets[2]->ShaderProgram->getUniformLocation("u_screenColor");
 
     // 通常（クリッピング・反転）
     _shaderSets[3]->AttributePositionLocation = _shaderSets[3]->ShaderProgram->getAttributeLocation("a_position");
@@ -1149,6 +1247,8 @@ void CubismShader_Cocos2dx::GenerateShaders()
     _shaderSets[3]->UniformClipMatrixLocation = _shaderSets[3]->ShaderProgram->getUniformLocation("u_clipMatrix");
     _shaderSets[3]->UnifromChannelFlagLocation = _shaderSets[3]->ShaderProgram->getUniformLocation("u_channelFlag");
     _shaderSets[3]->UniformBaseColorLocation = _shaderSets[3]->ShaderProgram->getUniformLocation("u_baseColor");
+    _shaderSets[3]->UniformMultiplyColorLocation = _shaderSets[3]->ShaderProgram->getUniformLocation("u_multiplyColor");
+    _shaderSets[3]->UniformScreenColorLocation = _shaderSets[3]->ShaderProgram->getUniformLocation("u_screenColor");
 
     // 通常（PremultipliedAlpha）
     _shaderSets[4]->AttributePositionLocation = _shaderSets[4]->ShaderProgram->getAttributeLocation("a_position");
@@ -1156,6 +1256,8 @@ void CubismShader_Cocos2dx::GenerateShaders()
     _shaderSets[4]->SamplerTexture0Location = _shaderSets[4]->ShaderProgram->getUniformLocation("s_texture0");
     _shaderSets[4]->UniformMatrixLocation = _shaderSets[4]->ShaderProgram->getUniformLocation("u_matrix");
     _shaderSets[4]->UniformBaseColorLocation = _shaderSets[4]->ShaderProgram->getUniformLocation("u_baseColor");
+    _shaderSets[4]->UniformMultiplyColorLocation = _shaderSets[4]->ShaderProgram->getUniformLocation("u_multiplyColor");
+    _shaderSets[4]->UniformScreenColorLocation = _shaderSets[4]->ShaderProgram->getUniformLocation("u_screenColor");
 
     // 通常（クリッピング、PremultipliedAlpha）
     _shaderSets[5]->AttributePositionLocation = _shaderSets[5]->ShaderProgram->getAttributeLocation("a_position");
@@ -1166,6 +1268,8 @@ void CubismShader_Cocos2dx::GenerateShaders()
     _shaderSets[5]->UniformClipMatrixLocation = _shaderSets[5]->ShaderProgram->getUniformLocation("u_clipMatrix");
     _shaderSets[5]->UnifromChannelFlagLocation = _shaderSets[5]->ShaderProgram->getUniformLocation("u_channelFlag");
     _shaderSets[5]->UniformBaseColorLocation = _shaderSets[5]->ShaderProgram->getUniformLocation("u_baseColor");
+    _shaderSets[5]->UniformMultiplyColorLocation = _shaderSets[5]->ShaderProgram->getUniformLocation("u_multiplyColor");
+    _shaderSets[5]->UniformScreenColorLocation = _shaderSets[5]->ShaderProgram->getUniformLocation("u_screenColor");
 
     // 通常（クリッピング・反転、PremultipliedAlpha）
     _shaderSets[6]->AttributePositionLocation = _shaderSets[6]->ShaderProgram->getAttributeLocation("a_position");
@@ -1176,6 +1280,8 @@ void CubismShader_Cocos2dx::GenerateShaders()
     _shaderSets[6]->UniformClipMatrixLocation = _shaderSets[6]->ShaderProgram->getUniformLocation("u_clipMatrix");
     _shaderSets[6]->UnifromChannelFlagLocation = _shaderSets[6]->ShaderProgram->getUniformLocation("u_channelFlag");
     _shaderSets[6]->UniformBaseColorLocation = _shaderSets[6]->ShaderProgram->getUniformLocation("u_baseColor");
+    _shaderSets[6]->UniformMultiplyColorLocation = _shaderSets[6]->ShaderProgram->getUniformLocation("u_multiplyColor");
+    _shaderSets[6]->UniformScreenColorLocation = _shaderSets[6]->ShaderProgram->getUniformLocation("u_screenColor");
 
     // 加算
     _shaderSets[7]->AttributePositionLocation = _shaderSets[7]->ShaderProgram->getAttributeLocation("a_position");
@@ -1183,6 +1289,8 @@ void CubismShader_Cocos2dx::GenerateShaders()
     _shaderSets[7]->SamplerTexture0Location = _shaderSets[7]->ShaderProgram->getUniformLocation("s_texture0");
     _shaderSets[7]->UniformMatrixLocation = _shaderSets[7]->ShaderProgram->getUniformLocation("u_matrix");
     _shaderSets[7]->UniformBaseColorLocation = _shaderSets[7]->ShaderProgram->getUniformLocation("u_baseColor");
+    _shaderSets[7]->UniformMultiplyColorLocation = _shaderSets[7]->ShaderProgram->getUniformLocation("u_multiplyColor");
+    _shaderSets[7]->UniformScreenColorLocation = _shaderSets[7]->ShaderProgram->getUniformLocation("u_screenColor");
 
     // 加算（クリッピング）
     _shaderSets[8]->AttributePositionLocation = _shaderSets[8]->ShaderProgram->getAttributeLocation("a_position");
@@ -1193,6 +1301,8 @@ void CubismShader_Cocos2dx::GenerateShaders()
     _shaderSets[8]->UniformClipMatrixLocation = _shaderSets[8]->ShaderProgram->getUniformLocation("u_clipMatrix");
     _shaderSets[8]->UnifromChannelFlagLocation = _shaderSets[8]->ShaderProgram->getUniformLocation("u_channelFlag");
     _shaderSets[8]->UniformBaseColorLocation = _shaderSets[8]->ShaderProgram->getUniformLocation("u_baseColor");
+    _shaderSets[8]->UniformMultiplyColorLocation = _shaderSets[8]->ShaderProgram->getUniformLocation("u_multiplyColor");
+    _shaderSets[8]->UniformScreenColorLocation = _shaderSets[8]->ShaderProgram->getUniformLocation("u_screenColor");
 
     // 加算（クリッピング・反転）
     _shaderSets[9]->AttributePositionLocation = _shaderSets[9]->ShaderProgram->getAttributeLocation("a_position");
@@ -1203,6 +1313,8 @@ void CubismShader_Cocos2dx::GenerateShaders()
     _shaderSets[9]->UniformClipMatrixLocation = _shaderSets[9]->ShaderProgram->getUniformLocation("u_clipMatrix");
     _shaderSets[9]->UnifromChannelFlagLocation = _shaderSets[9]->ShaderProgram->getUniformLocation("u_channelFlag");
     _shaderSets[9]->UniformBaseColorLocation = _shaderSets[9]->ShaderProgram->getUniformLocation("u_baseColor");
+    _shaderSets[9]->UniformMultiplyColorLocation = _shaderSets[9]->ShaderProgram->getUniformLocation("u_multiplyColor");
+    _shaderSets[9]->UniformScreenColorLocation = _shaderSets[9]->ShaderProgram->getUniformLocation("u_screenColor");
 
     // 加算（PremultipliedAlpha）
     _shaderSets[10]->AttributePositionLocation = _shaderSets[10]->ShaderProgram->getAttributeLocation("a_position");
@@ -1210,6 +1322,8 @@ void CubismShader_Cocos2dx::GenerateShaders()
     _shaderSets[10]->SamplerTexture0Location = _shaderSets[10]->ShaderProgram->getUniformLocation("s_texture0");
     _shaderSets[10]->UniformMatrixLocation = _shaderSets[10]->ShaderProgram->getUniformLocation("u_matrix");
     _shaderSets[10]->UniformBaseColorLocation = _shaderSets[10]->ShaderProgram->getUniformLocation("u_baseColor");
+    _shaderSets[10]->UniformMultiplyColorLocation = _shaderSets[10]->ShaderProgram->getUniformLocation("u_multiplyColor");
+    _shaderSets[10]->UniformScreenColorLocation = _shaderSets[10]->ShaderProgram->getUniformLocation("u_screenColor");
 
     // 加算（クリッピング、PremultipliedAlpha）
     _shaderSets[11]->AttributePositionLocation = _shaderSets[11]->ShaderProgram->getAttributeLocation("a_position");
@@ -1220,6 +1334,8 @@ void CubismShader_Cocos2dx::GenerateShaders()
     _shaderSets[11]->UniformClipMatrixLocation = _shaderSets[11]->ShaderProgram->getUniformLocation("u_clipMatrix");
     _shaderSets[11]->UnifromChannelFlagLocation = _shaderSets[11]->ShaderProgram->getUniformLocation("u_channelFlag");
     _shaderSets[11]->UniformBaseColorLocation = _shaderSets[11]->ShaderProgram->getUniformLocation("u_baseColor");
+    _shaderSets[11]->UniformMultiplyColorLocation = _shaderSets[11]->ShaderProgram->getUniformLocation("u_multiplyColor");
+    _shaderSets[11]->UniformScreenColorLocation = _shaderSets[11]->ShaderProgram->getUniformLocation("u_screenColor");
 
     // 加算（クリッピング・反転、PremultipliedAlpha）
     _shaderSets[12]->AttributePositionLocation = _shaderSets[12]->ShaderProgram->getAttributeLocation("a_position");
@@ -1230,6 +1346,8 @@ void CubismShader_Cocos2dx::GenerateShaders()
     _shaderSets[12]->UniformClipMatrixLocation = _shaderSets[12]->ShaderProgram->getUniformLocation("u_clipMatrix");
     _shaderSets[12]->UnifromChannelFlagLocation = _shaderSets[12]->ShaderProgram->getUniformLocation("u_channelFlag");
     _shaderSets[12]->UniformBaseColorLocation = _shaderSets[12]->ShaderProgram->getUniformLocation("u_baseColor");
+    _shaderSets[12]->UniformMultiplyColorLocation = _shaderSets[12]->ShaderProgram->getUniformLocation("u_multiplyColor");
+    _shaderSets[12]->UniformScreenColorLocation = _shaderSets[12]->ShaderProgram->getUniformLocation("u_screenColor");
 
     // 乗算
     _shaderSets[13]->AttributePositionLocation = _shaderSets[13]->ShaderProgram->getAttributeLocation("a_position");
@@ -1237,6 +1355,8 @@ void CubismShader_Cocos2dx::GenerateShaders()
     _shaderSets[13]->SamplerTexture0Location = _shaderSets[13]->ShaderProgram->getUniformLocation("s_texture0");
     _shaderSets[13]->UniformMatrixLocation = _shaderSets[13]->ShaderProgram->getUniformLocation("u_matrix");
     _shaderSets[13]->UniformBaseColorLocation = _shaderSets[13]->ShaderProgram->getUniformLocation("u_baseColor");
+    _shaderSets[13]->UniformMultiplyColorLocation = _shaderSets[13]->ShaderProgram->getUniformLocation("u_multiplyColor");
+    _shaderSets[13]->UniformScreenColorLocation = _shaderSets[13]->ShaderProgram->getUniformLocation("u_screenColor");
 
     // 乗算（クリッピング）
     _shaderSets[14]->AttributePositionLocation = _shaderSets[14]->ShaderProgram->getAttributeLocation("a_position");
@@ -1247,6 +1367,8 @@ void CubismShader_Cocos2dx::GenerateShaders()
     _shaderSets[14]->UniformClipMatrixLocation = _shaderSets[14]->ShaderProgram->getUniformLocation("u_clipMatrix");
     _shaderSets[14]->UnifromChannelFlagLocation = _shaderSets[14]->ShaderProgram->getUniformLocation("u_channelFlag");
     _shaderSets[14]->UniformBaseColorLocation = _shaderSets[14]->ShaderProgram->getUniformLocation("u_baseColor");
+    _shaderSets[14]->UniformMultiplyColorLocation = _shaderSets[14]->ShaderProgram->getUniformLocation("u_multiplyColor");
+    _shaderSets[14]->UniformScreenColorLocation = _shaderSets[14]->ShaderProgram->getUniformLocation("u_screenColor");
 
     // 乗算（クリッピング・反転）
     _shaderSets[15]->AttributePositionLocation = _shaderSets[15]->ShaderProgram->getAttributeLocation("a_position");
@@ -1257,6 +1379,8 @@ void CubismShader_Cocos2dx::GenerateShaders()
     _shaderSets[15]->UniformClipMatrixLocation = _shaderSets[15]->ShaderProgram->getUniformLocation("u_clipMatrix");
     _shaderSets[15]->UnifromChannelFlagLocation = _shaderSets[15]->ShaderProgram->getUniformLocation("u_channelFlag");
     _shaderSets[15]->UniformBaseColorLocation = _shaderSets[15]->ShaderProgram->getUniformLocation("u_baseColor");
+    _shaderSets[15]->UniformMultiplyColorLocation = _shaderSets[15]->ShaderProgram->getUniformLocation("u_multiplyColor");
+    _shaderSets[15]->UniformScreenColorLocation = _shaderSets[15]->ShaderProgram->getUniformLocation("u_screenColor");
 
     // 乗算（PremultipliedAlpha）
     _shaderSets[16]->AttributePositionLocation = _shaderSets[16]->ShaderProgram->getAttributeLocation( "a_position");
@@ -1264,6 +1388,8 @@ void CubismShader_Cocos2dx::GenerateShaders()
     _shaderSets[16]->SamplerTexture0Location = _shaderSets[16]->ShaderProgram->getUniformLocation("s_texture0");
     _shaderSets[16]->UniformMatrixLocation = _shaderSets[16]->ShaderProgram->getUniformLocation("u_matrix");
     _shaderSets[16]->UniformBaseColorLocation = _shaderSets[16]->ShaderProgram->getUniformLocation("u_baseColor");
+    _shaderSets[16]->UniformMultiplyColorLocation = _shaderSets[16]->ShaderProgram->getUniformLocation("u_multiplyColor");
+    _shaderSets[16]->UniformScreenColorLocation = _shaderSets[16]->ShaderProgram->getUniformLocation("u_screenColor");
 
     // 乗算（クリッピング、PremultipliedAlpha）
     _shaderSets[17]->AttributePositionLocation = _shaderSets[17]->ShaderProgram->getAttributeLocation("a_position");
@@ -1274,6 +1400,8 @@ void CubismShader_Cocos2dx::GenerateShaders()
     _shaderSets[17]->UniformClipMatrixLocation = _shaderSets[17]->ShaderProgram->getUniformLocation("u_clipMatrix");
     _shaderSets[17]->UnifromChannelFlagLocation = _shaderSets[17]->ShaderProgram->getUniformLocation("u_channelFlag");
     _shaderSets[17]->UniformBaseColorLocation = _shaderSets[17]->ShaderProgram->getUniformLocation("u_baseColor");
+    _shaderSets[17]->UniformMultiplyColorLocation = _shaderSets[17]->ShaderProgram->getUniformLocation("u_multiplyColor");
+    _shaderSets[17]->UniformScreenColorLocation = _shaderSets[17]->ShaderProgram->getUniformLocation("u_screenColor");
 
     // 乗算（クリッピング・反転、PremultipliedAlpha）
     _shaderSets[18]->AttributePositionLocation = _shaderSets[18]->ShaderProgram->getAttributeLocation("a_position");
@@ -1284,6 +1412,8 @@ void CubismShader_Cocos2dx::GenerateShaders()
     _shaderSets[18]->UniformClipMatrixLocation = _shaderSets[18]->ShaderProgram->getUniformLocation("u_clipMatrix");
     _shaderSets[18]->UnifromChannelFlagLocation = _shaderSets[18]->ShaderProgram->getUniformLocation("u_channelFlag");
     _shaderSets[18]->UniformBaseColorLocation = _shaderSets[18]->ShaderProgram->getUniformLocation("u_baseColor");
+    _shaderSets[18]->UniformMultiplyColorLocation = _shaderSets[18]->ShaderProgram->getUniformLocation("u_multiplyColor");
+    _shaderSets[18]->UniformScreenColorLocation = _shaderSets[18]->ShaderProgram->getUniformLocation("u_screenColor");
 }
 
 void CubismShader_Cocos2dx::SetupShaderProgram(CubismCommandBuffer_Cocos2dx::DrawCommandBuffer::DrawCommand* drawCommand, CubismRenderer_Cocos2dx* renderer, cocos2d::Texture2D* texture
@@ -1291,6 +1421,8 @@ void CubismShader_Cocos2dx::SetupShaderProgram(CubismCommandBuffer_Cocos2dx::Dra
                                                 , csmFloat32* uvArray, csmFloat32 opacity
                                                 , CubismRenderer::CubismBlendMode colorBlendMode
                                                 , CubismRenderer::CubismTextureColor baseColor
+                                                , CubismRenderer::CubismTextureColor multiplyColor
+                                                , CubismRenderer::CubismTextureColor screenColor
                                                 , csmBool isPremultipliedAlpha, CubismMatrix44 matrix4x4
                                                 , csmBool invertedMask)
 {
@@ -1339,6 +1471,12 @@ void CubismShader_Cocos2dx::SetupShaderProgram(CubismCommandBuffer_Cocos2dx::Dra
                                     rect->GetRight() * 2.0f - 1.0f,
                                     rect->GetBottom() * 2.0f - 1.0f };
         programState->setUniform(shaderSet->UniformBaseColorLocation, base, sizeof(float) * 4);
+
+        csmFloat32 multiply[4] = { multiplyColor.R, multiplyColor.G, multiplyColor.B, multiplyColor.A };
+        programState->setUniform(shaderSet->UniformMultiplyColorLocation, multiply, sizeof(float) * 4);
+
+        csmFloat32 screen[4] = { screenColor.R, screenColor.G, screenColor.B, screenColor.A };
+        programState->setUniform(shaderSet->UniformScreenColorLocation, screen, sizeof(float) * 4);
 
         blendDescriptor->sourceRGBBlendFactor = cocos2d::backend::BlendFactor::ZERO;
         blendDescriptor->destinationRGBBlendFactor = cocos2d::backend::BlendFactor::ONE_MINUS_SRC_COLOR;
@@ -1416,6 +1554,12 @@ void CubismShader_Cocos2dx::SetupShaderProgram(CubismCommandBuffer_Cocos2dx::Dra
 
         csmFloat32 base[4] = { baseColor.R, baseColor.G, baseColor.B, baseColor.A };
         programState->setUniform(shaderSet->UniformBaseColorLocation, base, sizeof(float) * 4);
+
+        csmFloat32 multiply[4] = { multiplyColor.R, multiplyColor.G, multiplyColor.B, multiplyColor.A };
+        programState->setUniform(shaderSet->UniformMultiplyColorLocation, multiply, sizeof(float) * 4);
+
+        csmFloat32 screen[4] = { screenColor.R, screenColor.G, screenColor.B, screenColor.A };
+        programState->setUniform(shaderSet->UniformScreenColorLocation, screen, sizeof(float) * 4);
     }
 
     programState->getVertexLayout()->setLayout(sizeof(csmFloat32) * 4);
@@ -1457,6 +1601,11 @@ void CubismRenderer::StaticRelease()
     CubismRenderer_Cocos2dx::DoStaticRelease();
 }
 
+namespace
+{
+    CubismCommandBuffer_Cocos2dx*       _commandBuffer;
+}
+
 CubismRenderer_Cocos2dx::CubismRenderer_Cocos2dx() : _clippingManager(NULL)
                                                      , _clippingContextBufferForMask(NULL)
                                                      , _clippingContextBufferForDraw(NULL)
@@ -1468,6 +1617,31 @@ CubismRenderer_Cocos2dx::CubismRenderer_Cocos2dx() : _clippingManager(NULL)
 CubismRenderer_Cocos2dx::~CubismRenderer_Cocos2dx()
 {
     CSM_DELETE_SELF(CubismClippingManager_Cocos2dx, _clippingManager);
+
+    if (_drawableDrawCommandBuffer.GetSize() > 0)
+    {
+        for (csmInt32 i = 0 ; i < _drawableDrawCommandBuffer.GetSize() ; i++)
+        {
+            if (_drawableDrawCommandBuffer[i] != NULL)
+            {
+                CSM_DELETE(_drawableDrawCommandBuffer[i]);
+            }
+        }
+    }
+
+    if (_drawableDrawCommandBuffer.GetSize() > 0)
+    {
+        _drawableDrawCommandBuffer.Clear();
+    }
+
+    if (_textures.GetSize() > 0)
+    {
+        _textures.Clear();
+    }
+    if (_offscreenFrameBuffer.IsValid())
+    {
+        _offscreenFrameBuffer.DestroyOffscreenFrame();
+    }
 }
 
 void CubismRenderer_Cocos2dx::DoStaticRelease()
@@ -1491,7 +1665,7 @@ void CubismRenderer_Cocos2dx::Initialize(CubismModel* model)
             model->GetDrawableMaskCounts()
         );
 
-        _offscreenFrameBuffer.CreateOffscreenFrame(_clippingManager->GetClippingMaskBufferSize(), _clippingManager->GetClippingMaskBufferSize());
+        _offscreenFrameBuffer.CreateOffscreenFrame(_clippingManager->GetClippingMaskBufferSize().X, _clippingManager->GetClippingMaskBufferSize().Y);
     }
 
     _sortedDrawableIndexList.Resize(model->GetDrawableCount(), 0);
@@ -1521,9 +1695,9 @@ void CubismRenderer_Cocos2dx::Initialize(CubismModel* model)
 
 void CubismRenderer_Cocos2dx::PreDraw()
 {
-    _commandBuffer.SetOperationEnable(CubismCommandBuffer_Cocos2dx::OperationType_ScissorTest, false);
-    _commandBuffer.SetOperationEnable(CubismCommandBuffer_Cocos2dx::OperationType_StencilTest, false);
-    _commandBuffer.SetOperationEnable(CubismCommandBuffer_Cocos2dx::OperationType_DepthTest, false);
+    _commandBuffer->SetOperationEnable(CubismCommandBuffer_Cocos2dx::OperationType_ScissorTest, false);
+    _commandBuffer->SetOperationEnable(CubismCommandBuffer_Cocos2dx::OperationType_StencilTest, false);
+    _commandBuffer->SetOperationEnable(CubismCommandBuffer_Cocos2dx::OperationType_DepthTest, false);
 
 
     //異方性フィルタリング。プラットフォームのOpenGLによっては未対応の場合があるので、未設定のときは設定しない
@@ -1542,12 +1716,12 @@ void CubismRenderer_Cocos2dx::DoDrawModel()
         PreDraw();
 
         // サイズが違う場合はここで作成しなおし
-        if (_offscreenFrameBuffer.GetBufferWidth() != static_cast<csmUint32>(_clippingManager->GetClippingMaskBufferSize()) ||
-            _offscreenFrameBuffer.GetBufferHeight() != static_cast<csmUint32>(_clippingManager->GetClippingMaskBufferSize()))
+        if (_offscreenFrameBuffer.GetBufferWidth() != static_cast<csmUint32>(_clippingManager->GetClippingMaskBufferSize().X) ||
+            _offscreenFrameBuffer.GetBufferHeight() != static_cast<csmUint32>(_clippingManager->GetClippingMaskBufferSize().Y))
         {
             _offscreenFrameBuffer.DestroyOffscreenFrame();
             _offscreenFrameBuffer.CreateOffscreenFrame(
-                static_cast<csmUint32>(_clippingManager->GetClippingMaskBufferSize()), static_cast<csmUint32>(_clippingManager->GetClippingMaskBufferSize()));
+                static_cast<csmUint32>(_clippingManager->GetClippingMaskBufferSize().X), static_cast<csmUint32>(_clippingManager->GetClippingMaskBufferSize().Y));
         }
 
         _clippingManager->SetupClippingContext(*GetModel(), this, _rendererProfile._lastColorBuffer, _rendererProfile._lastViewport);
@@ -1605,15 +1779,15 @@ void CubismRenderer_Cocos2dx::DoDrawModel()
             if(clipContext->_isUsing) // 書くことになっていた
             {
                 // 生成したFrameBufferと同じサイズでビューポートを設定
-                _commandBuffer.Viewport(0, 0, _clippingManager->GetClippingMaskBufferSize(), _clippingManager->GetClippingMaskBufferSize());
+                _commandBuffer->Viewport(0, 0, _offscreenFrameBuffer.GetViewPortSize().Width, _offscreenFrameBuffer.GetViewPortSize().Height);
 
                 PreDraw(); // バッファをクリアする
 
-                _offscreenFrameBuffer.BeginDraw(&_commandBuffer, _rendererProfile._lastColorBuffer);
+                _offscreenFrameBuffer.BeginDraw(_commandBuffer, _rendererProfile._lastColorBuffer);
 
                 // マスクをクリアする
                 // 1が無効（描かれない）領域、0が有効（描かれる）領域。（シェーダで Cd*Csで0に近い値をかけてマスクを作る。1をかけると何も起こらない）
-                _offscreenFrameBuffer.Clear(&_commandBuffer, 1.0f, 1.0f, 1.0f, 1.0f);
+                _offscreenFrameBuffer.Clear(_commandBuffer, 1.0f, 1.0f, 1.0f, 1.0f);
             }
 
             {
@@ -1621,8 +1795,7 @@ void CubismRenderer_Cocos2dx::DoDrawModel()
                 for (csmInt32 index = 0; index < clipDrawCount; index++)
                 {
                     const csmInt32 clipDrawIndex = clipContext->_clippingIdList[index];
-                    CubismCommandBuffer_Cocos2dx::DrawCommandBuffer::DrawCommand* drawCommandMask = clipContext->_clippingCommandBufferList->At(index)->GetCommandDraw();
-
+                    CubismCommandBuffer_Cocos2dx::DrawCommandBuffer* drawCommandBufferMask = clipContext->_clippingCommandBufferList->At(index);
 
                     // 頂点情報が更新されておらず、信頼性がない場合は描画をパスする
                     if (!GetModel()->GetDrawableDynamicFlagVertexPositionsDidChange(clipDrawIndex))
@@ -1637,17 +1810,41 @@ void CubismRenderer_Cocos2dx::DoDrawModel()
                         continue;
                     }
 
+                    // Update Vertex / Index buffer.
+                    {
+                        csmFloat32* vertices = const_cast<csmFloat32*>(GetModel()->GetDrawableVertices(clipDrawIndex));
+                        Core::csmVector2* uvs = const_cast<Core::csmVector2*>(GetModel()->GetDrawableVertexUvs(clipDrawIndex));
+                        csmUint16* vertexIndices = const_cast<csmUint16*>(GetModel()->GetDrawableVertexIndices(clipDrawIndex));
+                        const csmUint32 vertexCount = GetModel()->GetDrawableVertexCount(clipDrawIndex);
+                        const csmUint32 vertexIndexCount = GetModel()->GetDrawableVertexIndexCount(clipDrawIndex);
+
+                        drawCommandBufferMask->UpdateVertexBuffer(vertices, uvs, vertexCount);
+                        drawCommandBufferMask->CommitVertexBuffer();
+                        if (vertexIndexCount > 0)
+                        {
+                            drawCommandBufferMask->UpdateIndexBuffer(vertexIndices, vertexIndexCount);
+                        }
+
+                        if (vertexCount <= 0)
+                        {
+                            continue;
+                        }
+
+                    }
+
                     // 今回専用の変換を適用して描く
                     // チャンネルも切り替える必要がある(A,R,G,B)
                     SetClippingContextBufferForMask(clipContext);
                     DrawMeshCocos2d(
-                        drawCommandMask,
-                        GetModel()->GetDrawableTextureIndices(clipDrawIndex),
+                        drawCommandBufferMask->GetCommandDraw(),
+                        GetModel()->GetDrawableTextureIndex(clipDrawIndex),
                         GetModel()->GetDrawableVertexIndexCount(clipDrawIndex),
                         GetModel()->GetDrawableVertexCount(clipDrawIndex),
                         const_cast<csmUint16*>(GetModel()->GetDrawableVertexIndices(clipDrawIndex)),
                         const_cast<csmFloat32*>(GetModel()->GetDrawableVertices(clipDrawIndex)),
                         reinterpret_cast<csmFloat32*>(const_cast<Core::csmVector2*>(GetModel()->GetDrawableVertexUvs(clipDrawIndex))),
+                        GetModel()->GetMultiplyColor(clipDrawIndex),
+                        GetModel()->GetScreenColor(clipDrawIndex),
                         GetModel()->GetDrawableOpacity(clipDrawIndex),
                         CubismRenderer::CubismBlendMode_Normal,   //クリッピングは通常描画を強制
                         false // マスク生成時はクリッピングの反転使用は全く関係がない
@@ -1657,9 +1854,9 @@ void CubismRenderer_Cocos2dx::DoDrawModel()
 
             {
                 // --- 後処理 ---
-                _offscreenFrameBuffer.EndDraw(&_commandBuffer);
+                _offscreenFrameBuffer.EndDraw(_commandBuffer);
                 SetClippingContextBufferForMask(NULL);
-                _commandBuffer.Viewport(_rendererProfile._lastViewport.X, _rendererProfile._lastViewport.Y, _rendererProfile._lastViewport.Width, _rendererProfile._lastViewport.Height);
+                _commandBuffer->Viewport(_rendererProfile._lastViewport.X, _rendererProfile._lastViewport.Y, _rendererProfile._lastViewport.Width, _rendererProfile._lastViewport.Height);
 
                 PreDraw(); // バッファをクリアする
             }
@@ -1679,12 +1876,14 @@ void CubismRenderer_Cocos2dx::DoDrawModel()
 
         DrawMeshCocos2d(
             drawCommandDraw,
-            GetModel()->GetDrawableTextureIndices(drawableIndex),
+            GetModel()->GetDrawableTextureIndex(drawableIndex),
             GetModel()->GetDrawableVertexIndexCount(drawableIndex),
             GetModel()->GetDrawableVertexCount(drawableIndex),
             const_cast<csmUint16*>(GetModel()->GetDrawableVertexIndices(drawableIndex)),
             const_cast<csmFloat32*>(GetModel()->GetDrawableVertices(drawableIndex)),
             reinterpret_cast<csmFloat32*>(const_cast<Core::csmVector2*>(GetModel()->GetDrawableVertexUvs(drawableIndex))),
+            GetModel()->GetMultiplyColor(drawableIndex),
+            GetModel()->GetScreenColor(drawableIndex),
             GetModel()->GetDrawableOpacity(drawableIndex),
             GetModel()->GetDrawableBlendMode(drawableIndex),
             GetModel()->GetDrawableInvertedMask(drawableIndex) // マスクを反転使用するか
@@ -1704,6 +1903,7 @@ void CubismRenderer_Cocos2dx::DrawMesh(csmInt32 textureNo, csmInt32 indexCount, 
 
 void CubismRenderer_Cocos2dx::DrawMeshCocos2d(CubismCommandBuffer_Cocos2dx::DrawCommandBuffer::DrawCommand* drawCommand, csmInt32 textureNo, csmInt32 indexCount, csmInt32 vertexCount
                                         , csmUint16* indexArray, csmFloat32* vertexArray, csmFloat32* uvArray
+                                        , const CubismTextureColor& multiplyColor, const CubismTextureColor& screenColor
                                         , csmFloat32 opacity, CubismBlendMode colorBlendMode, csmBool invertedMask)
 {
 #ifndef CSM_DEBUG
@@ -1713,15 +1913,15 @@ void CubismRenderer_Cocos2dx::DrawMeshCocos2d(CubismCommandBuffer_Cocos2dx::Draw
     // 裏面描画の有効・無効
     if (IsCulling())
     {
-        _commandBuffer.SetOperationEnable(CubismCommandBuffer_Cocos2dx::OperationType_Culling, true);
+        _commandBuffer->SetOperationEnable(CubismCommandBuffer_Cocos2dx::OperationType_Culling, true);
     }
     else
     {
-        _commandBuffer.SetOperationEnable(CubismCommandBuffer_Cocos2dx::OperationType_Culling, false);
+        _commandBuffer->SetOperationEnable(CubismCommandBuffer_Cocos2dx::OperationType_Culling, false);
     }
 
     // Cubism SDK OpenGLはマスク・アートメッシュ共にCCWが表面
-    _commandBuffer.SetWindingMode(CubismCommandBuffer_Cocos2dx::WindingType_CounterClockWise);
+    _commandBuffer->SetWindingMode(CubismCommandBuffer_Cocos2dx::WindingType_CounterClockWise);
 
     CubismTextureColor modelColorRGBA = GetModelColor();
 
@@ -1752,18 +1952,32 @@ void CubismRenderer_Cocos2dx::DrawMeshCocos2d(CubismCommandBuffer_Cocos2dx::Draw
 
     CubismShader_Cocos2dx::GetInstance()->SetupShaderProgram(
         drawCommand, this, drawTexture, vertexCount, vertexArray, uvArray
-        , opacity, colorBlendMode, modelColorRGBA, IsPremultipliedAlpha()
+        , opacity, colorBlendMode, modelColorRGBA, multiplyColor, screenColor, IsPremultipliedAlpha()
         , GetMvpMatrix(), invertedMask
     );
 
 
     // ポリゴンメッシュを描画する
-    _commandBuffer.AddDrawCommand(drawCommand);
+    _commandBuffer->AddDrawCommand(drawCommand);
 
 
     // 後処理
     SetClippingContextBufferForDraw(NULL);
     SetClippingContextBufferForMask(NULL);
+}
+
+CubismCommandBuffer_Cocos2dx* CubismRenderer_Cocos2dx::GetCommandBuffer()
+{
+    return _commandBuffer;
+}
+
+void CubismRenderer_Cocos2dx::StartFrame(CubismCommandBuffer_Cocos2dx* commandBuffer)
+{
+    _commandBuffer = commandBuffer;
+}
+
+void CubismRenderer_Cocos2dx::EndFrame(CubismCommandBuffer_Cocos2dx* commandBuffer)
+{
 }
 
 CubismCommandBuffer_Cocos2dx::DrawCommandBuffer* CubismRenderer_Cocos2dx::GetDrawCommandBufferData(csmInt32 drawableIndex)
@@ -1791,14 +2005,14 @@ const csmMap<csmInt32, cocos2d::Texture2D*>& CubismRenderer_Cocos2dx::GetBindedT
     return _textures;
 }
 
-void CubismRenderer_Cocos2dx::SetClippingMaskBufferSize(csmInt32 size)
+void CubismRenderer_Cocos2dx::SetClippingMaskBufferSize(csmFloat32 width, csmFloat32 height)
 {
     //FrameBufferのサイズを変更するためにインスタンスを破棄・再作成する
     CSM_DELETE_SELF(CubismClippingManager_Cocos2dx, _clippingManager);
 
     _clippingManager = CSM_NEW CubismClippingManager_Cocos2dx();
 
-    _clippingManager->SetClippingMaskBufferSize(size);
+    _clippingManager->SetClippingMaskBufferSize(width, height);
 
     _clippingManager->Initialize(
         *GetModel(),
@@ -1808,7 +2022,7 @@ void CubismRenderer_Cocos2dx::SetClippingMaskBufferSize(csmInt32 size)
     );
 }
 
-csmInt32 CubismRenderer_Cocos2dx::GetClippingMaskBufferSize() const
+CubismVector2 CubismRenderer_Cocos2dx::GetClippingMaskBufferSize() const
 {
     return _clippingManager->GetClippingMaskBufferSize();
 }

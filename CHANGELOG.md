@@ -5,6 +5,105 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
+## [4-r.5-beta.4.1] - 2022-07-08
+
+### Fixed
+
+* Fix Core API called in GetDrawableParentPartIndex function.
+
+
+## [4-r.5-beta.4] - 2022-07-07
+
+### Added
+
+* Add a function to get the latest .moc3 Version and the .moc3 Version of the loaded model.
+* Add a function to get the type of parameters of the model.
+* Add a function to get the parent part of the model's Drawable.
+
+### Changed
+
+* Disable ARC in Metal renderer.
+
+### Fixed
+
+* Fix dangling pointer in `GetRenderPassDescriptor` function for Metal.
+
+
+
+## [4-r.5-beta.3] - 2022-06-16
+
+### Fixed
+
+* `GetDrawableTextureIndices` function in `CubismModel` has been renamed to `GetDrawableTextureIndex` because the name was not correct.
+  * `GetDrawableTextureIndices` function is marked as deprecated.
+* Fix physics system behaviour when exists Physics Fps Setting in .physics3.json.
+* Fix force close problem when invalid `physics3.json` is read.
+* Fixed memory leak in Cocos2d-x.
+
+
+## [4-r.5-beta.2] - 2022-06-02
+
+### Fixed
+
+* Fixed a bug that caused Multiply Color / Screen Color of different objects to be applied.
+  * See `CHANGELOG.md` in Core.
+  * No modifications to Samples and Framework.
+
+
+## [4-r.5-beta.1] - 2022-05-19
+
+### Added
+
+* Add processing related to Multiply Color / Screen Color added in Cubism 4.2.
+* Add a function to reset the physics states.
+
+### Fixed
+
+* Fix GetTextureDirectory() to return the directory name of the 0th texture path.
+
+
+## [4-r.4] - 2021-12-09
+
+### Added
+
+* Add the rendering options on Metal:
+  * `USE_RENDER_TARGET`
+  * `USE_MODEL_RENDER_TARGET`
+
+* Add anisotropic filtering to Metal.
+* Add a macro to toggle the precision of floating point numbers in OpenGL fragment shaders.
+* Add a function to check `.cdi3.json` exists from `.model3.json`.
+* Add `CubismJsonHolder`, a common class used to instantiate and check the validity of `CubismJson`.
+  * Each Json parser will now warn if an class of `CubismJson` is invalid.
+
+### Changed
+
+* Change each Json parser inherits a common class `CubismJsonHolder`.
+
+### Fixed
+
+* Fix renderer for Cocos2d-x v4.0.
+   * `RenderTexture` was empty when using `USE_MODEL_RENDER_TARGET`.
+* Fix motions with different fade times from switching properly.
+* Fix a bug that motions currently played do not fade out when play a motion.
+
+
+## [4-r.4-beta.1] - 2021-10-07
+
+### Added
+
+* Add a function to parse the opacity from `.motion3.json`.
+* Add a Renderer for Metal API in iOS.
+  * There are some restrictions, see [NOTICE.md](https://github.com/Live2D/CubismNativeSamples/blob/e4144053d1546473d2e76d30779e26d84b00d9f9/NOTICE.md).
+
+### Fixed
+
+* Fix return correct error values for out-of-index arguments in cubismjson by [@cocor-au-lait](https://github.com/cocor-au-lait).
+* Fix a warning when `SegmentType` could not be obtained when loading motion.
+* Fix renderer for Cocos2d-x v4.0.
+  * Rendering didn't work when using `USE_RENDER_TARGET` and high precision masking.
+
+
 ## [4-r.3] - 2021-06-10
 
 ## [4-r.3-beta.1] - 2021-05-13
@@ -100,6 +199,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 * Fix invalid expressions of `CubismCdiJson`.
 
 
+[4-r.5-beta.4.1]: https://github.com/Live2D/CubismNativeFramework/compare/4-r.5-beta.4...4-r.5-beta.4.1
+[4-r.5-beta.4]: https://github.com/Live2D/CubismNativeFramework/compare/4-r.5-beta.3...4-r.5-beta.4
+[4-r.5-beta.3]: https://github.com/Live2D/CubismNativeFramework/compare/4-r.5-beta.2...4-r.5-beta.3
+[4-r.5-beta.2]: https://github.com/Live2D/CubismNativeFramework/compare/4-r.5-beta.1...4-r.5-beta.2
+[4-r.5-beta.1]: https://github.com/Live2D/CubismNativeFramework/compare/4-r.4...4-r.5-beta.1
+[4-r.4]: https://github.com/Live2D/CubismNativeFramework/compare/4-r.4-beta.1...4-r.4
+[4-r.4-beta.1]: https://github.com/Live2D/CubismNativeFramework/compare/4-r.3...4-r.4-beta.1
 [4-r.3]: https://github.com/Live2D/CubismNativeFramework/compare/4-r.3-beta.1...4-r.3
 [4-r.3-beta.1]: https://github.com/Live2D/CubismNativeFramework/compare/4-r.2...4-r.3-beta.1
 [4-r.2]: https://github.com/Live2D/CubismNativeFramework/compare/4-r.1...4-r.2
