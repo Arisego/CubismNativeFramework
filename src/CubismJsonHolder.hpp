@@ -46,7 +46,7 @@ namespace Live2D { namespace Cubism { namespace Framework {
          */
         csmBool IsValid()
         {
-            return _json;
+            return _json!=nullptr;
         }
 
     protected:
